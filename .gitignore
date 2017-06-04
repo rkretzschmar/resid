@@ -1,0 +1,6 @@
+out*
+dream_pipe
+.deps/
+.dirstamp
+.libs/
+.vscode/
