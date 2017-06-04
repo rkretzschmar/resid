@@ -64,6 +64,7 @@
                 if (true)
                 {
                     int samples_needed = SAMPLE_FREQUENCY * 50 - samples_in_frame;
+                    samples_needed = cycles;
                     while (samples_needed)
                     {
                         int sampled = sid.clock(samples_needed, (short *)m_buffer + buf_pos, MAX(OUTPUTBUFFERSIZE - buf_pos, samples_needed));
