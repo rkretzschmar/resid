@@ -13,14 +13,11 @@
 #define CPU_FREQ 985248 //1023444.642857142857143
 #define SAMPLE_FREQUENCY 44100
 
-#define INSTR_TO_CYCLE 3
+#define INSTR_TO_CYCLE 1
 
-    //using namespace reSID;
 
-    int main(int argc, char **argv)
+int main(int argc, char **argv)
 {
-
-    //poor man's audio overflow protection
     short* m_buffer = new short[OUTPUTBUFFERSIZE];
 
     reSID::SID sid;
@@ -36,6 +33,8 @@
     int buf_pos = 0;
     int samples_in_frame = 0;
 
+    sid.enable_filter(true);
+
     while (instr_buf)
     {
         unsigned int cmd_next;
@@ -46,15 +45,16 @@
         //fflush(stdout);
         {
             //How long this state will be sampled
-            unsigned int instrs = (cmd_next & (0x1FFF << 16)) >> 16;
-            reSID::cycle_count cycles = instrs * INSTR_TO_CYCLE;
-            //cycles = 1000;
+            unsigned int next_instrs = (cmd_next & (0x1FFF << 16)) >> 16;
+            next_instrs = (cmd_next & (0x1FFF << 16)) >> 16;
+            reSID::cycle_count cycles = next_instrs * INSTR_TO_CYCLE;
+            cycles = 1000;
 
             // FRAME ... pulls from SID
             if (cmd & (1 << 31))
             {
                 unsigned int f_nr = cmd & 0xFFFF;
-                fprintf(stderr, "FRAME %d | next instr in %04x\n", f_nr, instrs);
+                fprintf(stderr, "FRAME %d | next instr in %04x\n", f_nr, next_instrs);
                 //fprintf(stderr, " -- cmd: %08x\n     cmd_next: %08x    \n", cmd, cmd_next);
                 
                 //flush every frame until all is filled up
@@ -64,7 +64,7 @@
                     while (samples_needed > 0)
                     {
                         int needed_before = samples_needed;
-                        reSID::cycle_count cn = 10000; 
+                        reSID::cycle_count cn = 1000; 
                         int sampled = sid.clock(cn, (short *)m_buffer + buf_pos, MIN(OUTPUTBUFFERSIZE - buf_pos, samples_needed));
                         buf_pos += sampled;
                         samples_in_frame += sampled;
@@ -101,16 +101,15 @@
                         fprintf(stderr, "%02x%02x: received %00d samples (total %d) for %00d cycles (now %00d)\n", reg, val, sampled, samples_in_frame, cycles_before, cycles);
                         write(1, (short *)m_buffer, buf_pos * 2);
                         buf_pos = 0;
+                        //sid.clock();
+                        //cycles --;
                     }
-
-                    //sid.clock(cycles);
                 }
                 //Handle special instructions
                 else {
 
                 }
             }
-
 
             instr_buf--;
             cmd = cmd_next;
