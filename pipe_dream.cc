@@ -47,38 +47,41 @@
         {
             //How long this state will be sampled
             unsigned int instrs = (cmd_next & (0x1FFF << 16)) >> 16;
-            //reSID::cycle_count cycles = instrs * INSTR_TO_CYCLE;
+            reSID::cycle_count cycles = instrs * INSTR_TO_CYCLE;
+            //cycles = 1000;
 
-            //This quantizing cycle_counts, together with not filling up samples after frame rocks for glitch!!
-            reSID::cycle_count cycles = 5000;
-
-            // FRAME
+            // FRAME ... pulls from SID
             if (cmd & (1 << 31))
             {
                 unsigned int f_nr = cmd & 0xFFFF;
-
                 fprintf(stderr, "FRAME %d | next instr in %04x\n", f_nr, instrs);
                 //fprintf(stderr, " -- cmd: %08x\n     cmd_next: %08x    \n", cmd, cmd_next);
                 
-                //flush the last every frame until all is filled up
+                //flush every frame until all is filled up
                 if (true)
                 {
-                    int samples_needed = SAMPLE_FREQUENCY * 50 - samples_in_frame;
-                    samples_needed = cycles;
-                    while (samples_needed)
+                    int samples_needed = SAMPLE_FREQUENCY / 50 - samples_in_frame;
+                    while (samples_needed > 0)
                     {
-                        int sampled = sid.clock(samples_needed, (short *)m_buffer + buf_pos, MAX(OUTPUTBUFFERSIZE - buf_pos, samples_needed));
+                        int needed_before = samples_needed;
+                        reSID::cycle_count cn = 10000; 
+                        int sampled = sid.clock(cn, (short *)m_buffer + buf_pos, MIN(OUTPUTBUFFERSIZE - buf_pos, samples_needed));
                         buf_pos += sampled;
                         samples_in_frame += sampled;
+                        samples_needed -= sampled;
+
+                        fprintf(stderr, "FRAME %04x received %00d samples, %00d still needed (before %00d)\n", f_nr, sampled, samples_needed, needed_before);
 
                         write(1, (short *)m_buffer, buf_pos * 2);
+                        buf_pos = 0;
                     }
-                    //reset
-                    int samples_in_frame = 0;
+
                 }
+                //reset
+                samples_in_frame = 0;
             }
 
-            // INSTRUCTION
+            // INSTRUCTION ... push to sound buffer
             else
             {
                 reSID::reg8 reg = (cmd & 0xFF00) >> 8;
@@ -88,12 +91,17 @@
                 if (reg <= 24){
                     sid.write(reg, val);
 
-                    reSID::cycle_count cycles_before = cycles;
-                    int sampled = sid.clock(cycles, (short *)m_buffer + buf_pos, OUTPUTBUFFERSIZE - buf_pos);
-                    buf_pos += sampled;
-                    samples_in_frame += sampled;
+                    while (cycles)
+                    {
+                        reSID::cycle_count cycles_before = cycles;
+                        int sampled = sid.clock(cycles, (short *)m_buffer + buf_pos, OUTPUTBUFFERSIZE - buf_pos);
+                        buf_pos += sampled;
+                        samples_in_frame += sampled;
 
-                    fprintf(stderr, "%02x%02x: received %08x samples for %d cycles (now %d)\n", reg, val, sampled, cycles_before, cycles);
+                        fprintf(stderr, "%02x%02x: received %00d samples (total %d) for %00d cycles (now %00d)\n", reg, val, sampled, samples_in_frame, cycles_before, cycles);
+                        write(1, (short *)m_buffer, buf_pos * 2);
+                        buf_pos = 0;
+                    }
 
                     //sid.clock(cycles);
                 }
@@ -102,11 +110,13 @@
 
                 }
             }
-            
+
+
             instr_buf--;
             cmd = cmd_next;
         }
 
+        //good bye sample
         if (buf_pos >= OUTPUTBUFFERSIZE)
         {
             write(1, (short *)m_buffer, buf_pos*2);
