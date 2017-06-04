@@ -10,7 +10,7 @@
 #include "siddefs.h"
 
 #define OUTPUTBUFFERSIZE 8192
-#define CPU_FREQ 985248 //1023444.642857142857143
+#define CPU_FREQ 985248 //1023444.642857142857143 //NTSC: 1022730Hz
 #define SAMPLE_FREQUENCY 44100
 
 #define INSTR_TO_CYCLE 1
@@ -21,8 +21,9 @@ int main(int argc, char **argv)
     short* m_buffer = new short[OUTPUTBUFFERSIZE];
 
     reSID::SID sid;
-
-    sid.set_sampling_parameters((double) CPU_FREQ, reSID::SAMPLE_FAST, (double)SAMPLE_FREQUENCY);
+    //sid.set_chip_model(reSID::MOS6581);
+    sid.set_sampling_parameters((double) CPU_FREQ, reSID::SAMPLE_FAST, SAMPLE_FREQUENCY);
+    sid.enable_filter(true);
 
     unsigned int cmd;
     unsigned int instr_buf = 0;
@@ -32,8 +33,6 @@ int main(int argc, char **argv)
 
     int buf_pos = 0;
     int samples_in_frame = 0;
-
-    sid.enable_filter(true);
 
     while (instr_buf)
     {
@@ -48,7 +47,7 @@ int main(int argc, char **argv)
             unsigned int next_instrs = (cmd_next & (0x1FFF << 16)) >> 16;
             next_instrs = (cmd_next & (0x1FFF << 16)) >> 16;
             reSID::cycle_count cycles = next_instrs * INSTR_TO_CYCLE;
-            cycles = 1000;
+            //cycles = 1000;
 
             // FRAME ... pulls from SID
             if (cmd & (1 << 31))
@@ -65,20 +64,24 @@ int main(int argc, char **argv)
                     {
                         int needed_before = samples_needed;
                         reSID::cycle_count cn = 1000; 
-                        int sampled = sid.clock(cn, (short *)m_buffer + buf_pos, MIN(OUTPUTBUFFERSIZE - buf_pos, samples_needed));
+                        int sampled = sid.clock(cn, (short *)m_buffer + buf_pos, MIN(OUTPUTBUFFERSIZE - buf_pos, samples_needed), 1);
                         buf_pos += sampled;
                         samples_in_frame += sampled;
                         samples_needed -= sampled;
 
-                        fprintf(stderr, "FRAME %04x received %00d samples, %00d still needed (before %00d)\n", f_nr, sampled, samples_needed, needed_before);
+                        fprintf(stderr, "FRAME %04x received %00d samples (total %d), %00d still needed (before %00d)\n", f_nr, sampled, samples_in_frame, samples_needed, needed_before);
 
-                        write(1, (short *)m_buffer, buf_pos * 2);
-                        buf_pos = 0;
+                        if (buf_pos)
+                        {
+                            write(1, (short *)m_buffer, buf_pos * 2);
+                            buf_pos = 0;
+                        }
                     }
 
                 }
                 //reset
                 samples_in_frame = 0;
+                sid.reset();
             }
 
             // INSTRUCTION ... push to sound buffer
@@ -94,14 +97,14 @@ int main(int argc, char **argv)
                     while (cycles)
                     {
                         reSID::cycle_count cycles_before = cycles;
-                        int sampled = sid.clock(cycles, (short *)m_buffer + buf_pos, OUTPUTBUFFERSIZE - buf_pos);
+                        int sampled = sid.clock(cycles, (short *)m_buffer + buf_pos, OUTPUTBUFFERSIZE - buf_pos, 1);
                         buf_pos += sampled;
                         samples_in_frame += sampled;
 
                         fprintf(stderr, "%02x%02x: received %00d samples (total %d) for %00d cycles (now %00d)\n", reg, val, sampled, samples_in_frame, cycles_before, cycles);
                         write(1, (short *)m_buffer, buf_pos * 2);
                         buf_pos = 0;
-                        //sid.clock();
+                        //sid.clock(cycles);
                         //cycles --;
                     }
                 }
