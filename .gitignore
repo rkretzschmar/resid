@@ -1,6 +1,6 @@
 out*
-./pipe_dream
-./dream_pipe
+pipe_dream
+dream_pipe
 .deps/
 .dirstamp
 .libs/

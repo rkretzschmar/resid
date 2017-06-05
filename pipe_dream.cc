@@ -13,14 +13,15 @@
 #define CPU_FREQ 985248 //1023444.642857142857143 //NTSC: 1022730Hz
 #define SAMPLE_FREQUENCY 44100
 #define OUTPUTBUFFERSIZE (SAMPLE_FREQUENCY / 100)
+#define SCREEN_REFRESH 50
 
-//To scale aribtrary should cycles be quanitized
+//To scale should cycles be quanitized
 #define INSTR_TO_CYCLE 1
 
 
 void flush_buf(short* buf, int &buf_pos)
 {
-    fprintf(stderr, "Flushing %d max but with %d\n", OUTPUTBUFFERSIZE, buf_pos);
+    //fprintf(stderr, "Flushing %d max but with %d\n", OUTPUTBUFFERSIZE, buf_pos);
     if (buf_pos)
     {
         write(1, (short *)buf, buf_pos * 2);
@@ -30,6 +31,25 @@ void flush_buf(short* buf, int &buf_pos)
 
 int main(int argc, char **argv)
 {   
+
+
+    int verbose = 0;
+
+    // Scan arguments
+    for (int c = 0; c < argc; c++)
+    {
+        if (argv[c][0] == '-')
+        {
+            switch(argv[c][1])
+            {
+            case 'v':
+            verbose = 1;
+            break;
+            }
+            
+        }
+    }
+
     //Setup SID
     reSID::SID sid;
     sid.set_chip_model(reSID::MOS6581);
@@ -62,13 +82,11 @@ int main(int argc, char **argv)
             if (cmd & (1 << 31))
             {
                 unsigned int f_nr = cmd & 0xFFFF;
-                //fprintf(stderr, "FRAME %d | next instr in %04x\n", f_nr, dist_next);
-                //fprintf(stderr, " -- cmd: %08x\n     cmd_next: %08x    \n", cmd, cmd_next);
-                
+
+                int samples_needed = SAMPLE_FREQUENCY / SCREEN_REFRESH - samples_in_frame;
                 //Sample until the whole frame is filled up
-                if (true)
+                if (samples_needed > 0)
                 {
-                    int samples_needed = SAMPLE_FREQUENCY / 50 - samples_in_frame; //50 hardcoded!
                     while (samples_needed > 0)
                     {
                         reSID::cycle_count cn = 10000; 
@@ -79,8 +97,12 @@ int main(int argc, char **argv)
 
                         if (buf_pos >= OUTPUTBUFFERSIZE) flush_buf(m_buffer, buf_pos);
 
-                        fprintf(stderr, "FRAME %04x received %00d samples (total %d), %00d still needed\n", f_nr, sampled, samples_in_frame, samples_needed);   
+                        if (verbose) fprintf(stderr, "FRAME %04x, sampled %3d (total %5d) for %-3d cycles --> samples needed: %-5d\n", f_nr, sampled, samples_in_frame, 10000-cn, samples_needed);
                     }
+                }
+                else
+                {
+                    fprintf(stderr, "FRAME %04x, produced %00d samples too much (total %5d)\n", f_nr, -samples_needed, samples_in_frame);
                 }
                 //reset
                 flush_buf(m_buffer, buf_pos);
@@ -96,28 +118,30 @@ int main(int argc, char **argv)
                 
                 //Cycle exact sampling in between frames
                 if (reg <= 24){
-
                     //Poke SID
                     sid.write(reg, val);
-
-                    while (cycles)
-                    {
-                        reSID::cycle_count cycles_before = cycles;
-                        int sampled = sid.clock(cycles, (short *)m_buffer + buf_pos, OUTPUTBUFFERSIZE - buf_pos);
-                        buf_pos += sampled;
-                        samples_in_frame += sampled;
-
-                        if (buf_pos >= OUTPUTBUFFERSIZE) flush_buf(m_buffer, buf_pos);
-
-                        fprintf(stderr, "INST %02x%02x: received %00d samples (total %d) for %00d cycles (now %00d)\n", reg, val, sampled, samples_in_frame, cycles_before, cycles);
-                        
-                        /*sid.clock(cycles);
-                        cycles --;*/
-                    }
                 }
                 //Handle special instructions
-                else {
+                else
+                {
                 }
+
+                // Also sample for NOP = 25 and every other instruction
+                while (cycles)
+                {
+                    reSID::cycle_count cycles_before = cycles;
+                    int sampled = sid.clock(cycles, (short *)m_buffer + buf_pos, OUTPUTBUFFERSIZE - buf_pos);
+                    buf_pos += sampled;
+                    samples_in_frame += sampled;
+
+                    if (buf_pos >= OUTPUTBUFFERSIZE) flush_buf(m_buffer, buf_pos);
+
+                    if (verbose) fprintf(stderr, "INSTR %02x%02x, sampled %3d (total %5d) for %-3d cycles (now %3d)\n", reg, val, sampled, samples_in_frame, cycles_before, cycles);
+                    
+                    /*sid.clock(cycles);
+                    cycles --;*/
+                }
+                
             }
 
         }
