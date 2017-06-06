@@ -1,6 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include <string.h>
 
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -19,12 +23,12 @@
 #define INSTR_TO_CYCLE 1
 
 
-void flush_buf(short* buf, int &buf_pos)
+void flush_buf(short* buf, int &buf_pos, int fd)
 {
     //fprintf(stderr, "Flushing %d max but with %d\n", OUTPUTBUFFERSIZE, buf_pos);
     if (buf_pos)
     {
-        write(1, (short *)buf, buf_pos * 2);
+        write(fd, (short *)buf, buf_pos * 2);
         buf_pos = 0;
     }
 }
@@ -34,6 +38,12 @@ int main(int argc, char **argv)
 
 
     int verbose = 0;
+    char *fn = 0;
+    int fd_in = 0;
+
+    int fd_out = 1;
+    int use_sox = 0;
+    FILE *f_out = 0;
 
     // Scan arguments
     for (int c = 0; c < argc; c++)
@@ -45,8 +55,15 @@ int main(int argc, char **argv)
             case 'v':
             verbose = 1;
             break;
+            case 's':
+            use_sox = 1;
+            break;
             }
             
+        }
+        else
+        {
+            if (!fn) fn = argv[c];
         }
     }
 
@@ -56,6 +73,20 @@ int main(int argc, char **argv)
     const int halfFreq = 5000 * ((static_cast<int>(SAMPLE_FREQUENCY) + 5000) / 10000);
     sid.set_sampling_parameters((double)CPU_FREQ, reSID::SAMPLE_FAST, (double)SAMPLE_FREQUENCY, MIN(halfFreq, 20000));
     sid.enable_filter(true);
+
+    //Setup IO
+    if (fn)
+    {
+        fd_in = open(fn, O_RDONLY);
+        if (fd_in < 0) {
+            fprintf(stderr, "Cannot open %s", fn);
+            return 1;
+        }
+    }
+    if (use_sox) {
+        f_out = popen("sox -traw -r44100 -b16 -c 1 -e signed-integer - -tcoreaudio", "w");
+        fd_out = fileno(f_out);
+    }
 
     unsigned int cmd;
     unsigned int instr_buf = 0;
@@ -95,7 +126,7 @@ int main(int argc, char **argv)
                         samples_in_frame += sampled;
                         samples_needed -= sampled;
 
-                        if (buf_pos >= OUTPUTBUFFERSIZE) flush_buf(m_buffer, buf_pos);
+                        if (buf_pos >= OUTPUTBUFFERSIZE) flush_buf(m_buffer, buf_pos, fd_out);
 
                         if (verbose) fprintf(stderr, "FRAME %04x, sampled %3d (total %5d) for %-3d cycles --> samples needed: %-5d\n", f_nr, sampled, samples_in_frame, 10000-cn, samples_needed);
                     }
@@ -105,7 +136,7 @@ int main(int argc, char **argv)
                     fprintf(stderr, "FRAME %04x, produced %00d samples too much (total %5d)\n", f_nr, -samples_needed, samples_in_frame);
                 }
                 //reset
-                flush_buf(m_buffer, buf_pos);
+                flush_buf(m_buffer, buf_pos, fd_out);
                 samples_in_frame = 0;
                 //sid.reset();
             }
@@ -134,7 +165,7 @@ int main(int argc, char **argv)
                     buf_pos += sampled;
                     samples_in_frame += sampled;
 
-                    if (buf_pos >= OUTPUTBUFFERSIZE) flush_buf(m_buffer, buf_pos);
+                    if (buf_pos >= OUTPUTBUFFERSIZE) flush_buf(m_buffer, buf_pos, fd_out);
 
                     if (verbose) fprintf(stderr, "INSTR %02x%02x, sampled %3d (total %5d) for %-3d cycles (now %3d)\n", reg, val, sampled, samples_in_frame, cycles_before, cycles);
                     
@@ -150,6 +181,11 @@ int main(int argc, char **argv)
         cmd = cmd_next;
     }
 
-    flush_buf(m_buffer, buf_pos);
+    flush_buf(m_buffer, buf_pos, fd_out);
     delete[] m_buffer;
+
+    if (use_sox)
+    {
+        pclose(f_out);
+    }
 }
