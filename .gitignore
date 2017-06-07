@@ -5,3 +5,5 @@ dream_pipe
 .dirstamp
 .libs/
 .vscode/
+*.so
+*.o

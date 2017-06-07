@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
+//#include <sys/types.h>
+//#include <sys/stat.h>
 
 #include <string.h>
 
@@ -86,6 +86,8 @@ int main(int argc, char **argv)
     if (use_sox) {
         f_out = popen("sox -traw -r44100 -b16 -c 1 -e signed-integer - -tcoreaudio", "w");
         fd_out = fileno(f_out);
+        //reduce/match pipe buffer
+        //fnctl(fd_out, F_SETPIPE_SZ, OUTPUTBUFFERSIZE);
     }
 
     unsigned int cmd;
