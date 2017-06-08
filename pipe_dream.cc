@@ -12,6 +12,7 @@
 
 #include "sid.h"
 #include "siddefs.h"
+#include "lib_pipe_dream.h"
 
 //PAL and 50FPS and buffer size to have around 100fps sound flushing 
 #define CPU_FREQ 985248 //1023444.642857142857143 //NTSC: 1022730Hz
@@ -90,100 +91,40 @@ int main(int argc, char **argv)
         //fnctl(fd_out, F_SETPIPE_SZ, OUTPUTBUFFERSIZE);
     }
 
-    unsigned int cmd;
-    unsigned int instr_buf = 0;
-    int c_read = read(0, &cmd, 4);
-    if (c_read == 4) instr_buf++;
 
-    int samples_in_frame = 0;
+    unsigned int instr_buf[10];
     short *m_buffer = new short[OUTPUTBUFFERSIZE];
-    int buf_pos = 0;
 
-    while (instr_buf)
+    int idle_cycles = 0;
+    int idle_samples = 0;
+    int nr_instr = 0;
+
+    int _read = 1;
+    while (_read)
     {
-        unsigned int cmd_next;
-        int c_read = read(0, &cmd_next, 4);
-        if (c_read == 4) instr_buf++;
 
+        int nr_samples = OUTPUTBUFFERSIZE;
+        while (nr_samples > 0)
         {
-            //How long this state will be sampled
-            int dist_next = (cmd_next & (0x1FFF << 16)) >> 16;
-            reSID::cycle_count cycles = dist_next * INSTR_TO_CYCLE;
-            //cycles = 5000;
 
-            // FRAME ... pull from SID until full
-            if (cmd & (1 << 31))
+            if (nr_instr == 0)
             {
-                unsigned int f_nr = cmd & 0xFFFF;
-
-                int samples_needed = SAMPLE_FREQUENCY / SCREEN_REFRESH - samples_in_frame;
-                //Sample until the whole frame is filled up
-                if (samples_needed > 0)
-                {
-                    while (samples_needed > 0)
-                    {
-                        reSID::cycle_count cn = 10000; 
-                        int sampled = sid.clock(cn, (short *)m_buffer + buf_pos, MIN(OUTPUTBUFFERSIZE - buf_pos, samples_needed));
-                        buf_pos += sampled;
-                        samples_in_frame += sampled;
-                        samples_needed -= sampled;
-
-                        if (buf_pos >= OUTPUTBUFFERSIZE) flush_buf(m_buffer, buf_pos, fd_out);
-
-                        if (verbose) fprintf(stderr, "FRAME %04x, sampled %3d (total %5d) for %-3d cycles --> samples needed: %-5d\n", f_nr, sampled, samples_in_frame, 10000-cn, samples_needed);
-                    }
-                }
-                else
-                {
-                    fprintf(stderr, "FRAME %04x, produced %00d samples too much (total %5d)\n", f_nr, -samples_needed, samples_in_frame);
-                }
-                //reset
-                flush_buf(m_buffer, buf_pos, fd_out);
-                samples_in_frame = 0;
-                //sid.reset();
+                _read = read(0, instr_buf, 40);
+                nr_instr = _read / 4;
+                fprintf(stderr, "read %d\n", _read);
             }
 
-            // INSTRUCTION ... push to sound buffer
-            else
-            {
-                reSID::reg8 reg = (cmd & 0xFF00) >> 8;
-                reSID::reg8 val = cmd & 0xFF;
-                
-                //Cycle exact sampling in between frames
-                if (reg <= 24){
-                    //Poke SID
-                    sid.write(reg, val);
-                }
-                //Handle special instructions
-                else
-                {
-                }
+            fprintf(stderr, "EXE samples_to_go %d, instr_to_go %d, idle_cycles %d, idle_samples %d\n", nr_samples, nr_instr, idle_cycles, idle_samples);
+            
+            render_instrs(sid, instr_buf + (10-nr_instr), nr_instr, m_buffer, nr_samples, idle_cycles, idle_samples);
 
-                // Also sample for NOP = 25 and every other instruction
-                while (cycles)
-                {
-                    reSID::cycle_count cycles_before = cycles;
-                    int sampled = sid.clock(cycles, (short *)m_buffer + buf_pos, OUTPUTBUFFERSIZE - buf_pos);
-                    buf_pos += sampled;
-                    samples_in_frame += sampled;
-
-                    if (buf_pos >= OUTPUTBUFFERSIZE) flush_buf(m_buffer, buf_pos, fd_out);
-
-                    if (verbose) fprintf(stderr, "INSTR %02x%02x, sampled %3d (total %5d) for %-3d cycles (now %3d)\n", reg, val, sampled, samples_in_frame, cycles_before, cycles);
-                    
-                    /*sid.clock(cycles);
-                    cycles --;*/
-                }
-                
-            }
-
+            fprintf(stderr, "RET samples_to_go %d, instr_to_go %d, idle_cycles %d, idle_samples %d\n", nr_samples, nr_instr, idle_cycles, idle_samples);
         }
-        
-        instr_buf--;
-        cmd = cmd_next;
+        fprintf(stderr, "WRITE\n");
+        write(fd_out, m_buffer, (OUTPUTBUFFERSIZE - nr_samples)*2);
     }
 
-    flush_buf(m_buffer, buf_pos, fd_out);
+
     delete[] m_buffer;
 
     if (use_sox)
