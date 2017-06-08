@@ -53,61 +53,57 @@ int render_instrs(reSID::SID &sid,
                 short *samples, int &nr_samples, 
                 int &idle_cycles, int &idle_samples)
 {
-    // idle_cycles = the initial cycles to be sampled and returned which still need to be sampled
+    // idle_cycles = the cycles to be sampled when interrupted in executing instructions
     // idle_samples = the number of samples needed to catch up with an interrupted frame
 
     int buf_pos = 0;
 
-    if (nr_instr)
-    {
-        idle_cycles += (instrs[0] & (0x1FFF << 16)) >> 16;
-    }
-
-    while ((nr_samples > 0) && (idle_samples > 0))
-    {
-        reSID::cycle_count cn = 10000;
-
-        int sampled = sid.clock(cn, samples + buf_pos, MIN(idle_samples, nr_samples));
-        idle_cycles -= (10000 - cn);
-        nr_samples -= sampled;
-        idle_samples -= sampled;
-        buf_pos += sampled;
-
-        fprintf(stderr, "ISL instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
-    }
-
-    // catch up on initial idle_cycles
-    while ((idle_cycles > 0) && (nr_samples > 0))
-    {
-        int sampled = sid.clock(idle_cycles, samples + buf_pos, MAX(idle_samples, nr_samples));
-        nr_samples -= sampled;
-        idle_samples -= sampled;
-        buf_pos += sampled;
-        fprintf(stderr, "ICL instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
-    }
-
     // Couldn't empty idle time, return
-    if ((idle_samples > 0) || (idle_cycles > 0)) return 0;
+    //if ((idle_samples > 0) || (idle_cycles > 0)) return 0;
     //idle_samples = 0;
     //idle_cycles = 0;
 
     // fill up the rest
-    int samples_in_frame = -idle_samples;
     int instr_pos = 0;
     
     while ((nr_instr > 0) && (nr_samples > 0))
     {
 
+        // if i remove idle_cycle accumulation it doesn't crackle :/
         unsigned int cmd = instrs[instr_pos++];
-        nr_instr--;
+        idle_cycles += (cmd & (0x1FFF << 16)) >> 16;
 
-        // check upcoming cycles to assume to process them under the current command
-        if (nr_instr)
+        while ((nr_samples > 0) && (idle_samples > 0))
         {
-            idle_cycles = (instrs[instr_pos] & (0x1FFF << 16)) >> 16;
-            fprintf(stderr, "CMD DEL NOW %d, CMD DEL WORKING ON %d \n", (instrs[instr_pos-1] & (0x1FFF << 16)) >> 16, (instrs[instr_pos] & (0x1FFF << 16)) >> 16);
+            reSID::cycle_count cn = 10000;
+
+            int sampled = sid.clock(cn, samples + buf_pos, MIN(idle_samples, nr_samples));
+            idle_cycles -= (10000 - cn);
+            nr_samples -= sampled;
+            idle_samples -= sampled;
+            buf_pos += sampled;
+
+            fprintf(stderr, "ISL instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
         }
-        else idle_cycles = 0; // return? --> no, we have to execute the commands still
+
+        if (nr_samples == 0) 
+        {
+            idle_cycles = 0;
+            return 0;
+        }
+
+
+        // catch up on initial idle_cycles
+        while ((idle_cycles > 0) && (nr_samples > 0))
+        {
+            int sampled = sid.clock(idle_cycles, samples + buf_pos, MAX(idle_samples, nr_samples));
+            nr_samples -= sampled;
+            idle_samples -= sampled;
+            buf_pos += sampled;
+            fprintf(stderr, "ICL instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
+        }
+
+        if (nr_samples == 0) return 0;
 
         if ((cmd & (1 << 31)) == 0)
         {
@@ -115,7 +111,6 @@ int render_instrs(reSID::SID &sid,
             reSID::reg8 reg = (cmd & 0xFF00) >> 8;
             reSID::reg8 val = cmd & 0xFF;
 
-            //Cycle exact sampling in between frames
             if (reg <= 24)
             {
                 //Poke SID
@@ -126,23 +121,19 @@ int render_instrs(reSID::SID &sid,
             {
             };
             // Also sample for NOP == 25 and every other instruction
-            while ((nr_samples > 0) & (idle_cycles > 0))
+            /*while ((nr_samples > 0) & (idle_cycles > 0))
             {
                 reSID::cycle_count cycles_before = idle_cycles;
                 int sampled = sid.clock(idle_cycles, samples + buf_pos, nr_samples);
                 nr_samples -= sampled;
+                idle_samples -= sampled;
                 buf_pos += sampled;
-                samples_in_frame += sampled;
 
                 fprintf(stderr, "CMD instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
-                /*
-                if (verbose)
-                    fprintf(stderr, "INSTR %02x%02x, sampled %3d (total %5d) for %-3d cycles (now %3d)\n", reg, val, sampled, samples_in_frame, cycles_before, idle_cycles); */
 
-                /*sid.clock(idle_cycles);
-                cycles --;*/
-            }
-            // if nr_samples == 0 return ?
+                //sid.clock(idle_cycles);
+                //cycles --;
+            }*/
         }
 
         // FRAME ... pull from SID until samples_in_frame is ok
@@ -152,34 +143,26 @@ int render_instrs(reSID::SID &sid,
             unsigned int f_nr = cmd & 0xFFFF;
 
             fprintf(stderr, "IDLE SAMPLES %d\n", idle_samples);
-            idle_samples += SAMPLE_FREQUENCY / SCREEN_REFRESH - samples_in_frame;
+            idle_samples += SAMPLE_FREQUENCY / SCREEN_REFRESH;
             //Sample until the whole frame is filled up
             fprintf(stderr, "IDLE SAMPLES %d\n", idle_samples);
 
-            while ((nr_samples > 0) & ( (idle_cycles > 0) | (idle_samples > 0)))
+            /*while ((nr_samples > 0) && ((idle_cycles > 0) || (idle_samples > 0)))
             {
-                reSID::cycle_count cn = 10000;
+                reSID::cycle_count cn = CPU_FREQ;
 
                 int sampled = sid.clock(cn, samples + buf_pos, MIN(idle_samples, nr_samples));
-                idle_cycles -= (10000 - cn);
+                idle_cycles -= (CPU_FREQ - cn);
                 nr_samples -= sampled;
                 idle_samples -= sampled;
                 buf_pos += sampled;
-                samples_in_frame += sampled;
                 fprintf(stderr, "FRM %d, %d sampled, instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", f_nr, sampled, nr_instr, nr_samples, idle_cycles, idle_samples);
-                /*
-                if (verbose)
-                    fprintf(stderr, "FRAME %04x, sampled %3d (total %5d) for %-3d cycles --> samples needed: %-5d\n", f_nr, sampled, samples_in_frame, 10000 - cn, samples_needed); */
         
-            }
+            } */
         
-            //reset
-            if (idle_samples <= 0) 
-            {
-                samples_in_frame = 0;
-            }
             //sid.reset();
         }
 
+        nr_instr--;
     }
 }

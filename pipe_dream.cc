@@ -19,6 +19,7 @@
 #define SAMPLE_FREQUENCY 44100
 #define OUTPUTBUFFERSIZE (SAMPLE_FREQUENCY / 100)
 #define SCREEN_REFRESH 50
+#define INSTR_BUF 10
 
 //To scale should cycles be quanitized
 #define INSTR_TO_CYCLE 1
@@ -91,8 +92,7 @@ int main(int argc, char **argv)
         //fnctl(fd_out, F_SETPIPE_SZ, OUTPUTBUFFERSIZE);
     }
 
-
-    unsigned int instr_buf[10];
+    unsigned int instr_buf[INSTR_BUF];
     short *m_buffer = new short[OUTPUTBUFFERSIZE];
 
     int idle_cycles = 0;
@@ -109,14 +109,14 @@ int main(int argc, char **argv)
 
             if (nr_instr == 0)
             {
-                _read = read(0, instr_buf, 40);
+                _read = read(0, instr_buf, INSTR_BUF*4);
                 nr_instr = _read / 4;
                 fprintf(stderr, "read %d\n", _read);
             }
 
             fprintf(stderr, "EXE samples_to_go %d, instr_to_go %d, idle_cycles %d, idle_samples %d\n", nr_samples, nr_instr, idle_cycles, idle_samples);
-            
-            render_instrs(sid, instr_buf + (10-nr_instr), nr_instr, m_buffer, nr_samples, idle_cycles, idle_samples);
+
+            render_instrs(sid, instr_buf + (INSTR_BUF - nr_instr), nr_instr, m_buffer, nr_samples, idle_cycles, idle_samples);
 
             fprintf(stderr, "RET samples_to_go %d, instr_to_go %d, idle_cycles %d, idle_samples %d\n", nr_samples, nr_instr, idle_cycles, idle_samples);
         }
