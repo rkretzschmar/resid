@@ -57,24 +57,15 @@ int render_instrs(reSID::SID &sid,
     // idle_samples = the number of samples needed to catch up with an interrupted frame
 
     int buf_pos = 0;
-
-    // Couldn't empty idle time, return
-    //if ((idle_samples > 0) || (idle_cycles > 0)) return 0;
-    //idle_samples = 0;
-    //idle_cycles = 0;
-
-    // fill up the rest
     int instr_pos = 0;
-    
+
     while ((nr_instr > 0) && (nr_samples > 0))
     {
-        fprintf(stderr, "IDLE CYCLE %d\n", idle_cycles);
-
-        // if i remove idle_cycle accumulation it doesn't crackle :/
         unsigned int cmd = instrs[instr_pos++];
-        idle_cycles += (cmd & (0x1FFF << 16)) >> 16;
-
-        fprintf(stderr, "IDLE CYCLE %d\n", idle_cycles);
+        
+        // Removng idle_cycle accumulation avoids crackle,
+        // however, in essence accumulating them should be correct
+        // idle_cycles += (cmd & (0x1FFF << 16)) >> 16; //add frame
 
         while ((nr_samples > 0) && (idle_samples > 0))
         {
@@ -86,7 +77,7 @@ int render_instrs(reSID::SID &sid,
             idle_samples -= sampled;
             buf_pos += sampled;
 
-            fprintf(stderr, "ISL instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
+            //fprintf(stderr, "ISL instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
         }
 
         if (nr_samples == 0) 
@@ -95,7 +86,6 @@ int render_instrs(reSID::SID &sid,
             return 0;
         }
 
-
         // catch up on initial idle_cycles
         while ((idle_cycles > 0) && (nr_samples > 0))
         {
@@ -103,7 +93,7 @@ int render_instrs(reSID::SID &sid,
             nr_samples -= sampled;
             idle_samples -= sampled;
             buf_pos += sampled;
-            fprintf(stderr, "ICL instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
+            //fprintf(stderr, "ICL instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
         }
 
         if (nr_samples == 0) return 0;
@@ -119,53 +109,25 @@ int render_instrs(reSID::SID &sid,
                 //Poke SID
                 sid.write(reg, val);
             }
-            //Handle special instructions
+            //Here, handle special instructions if needed
             else
-            {
+            {   // Todo:
+                // Also sample for NOOP == 25 and every other instruction?
             };
-            // Also sample for NOP == 25 and every other instruction
-            /*while ((nr_samples > 0) & (idle_cycles > 0))
-            {
-                reSID::cycle_count cycles_before = idle_cycles;
-                int sampled = sid.clock(idle_cycles, samples + buf_pos, nr_samples);
-                nr_samples -= sampled;
-                idle_samples -= sampled;
-                buf_pos += sampled;
-
-                fprintf(stderr, "CMD instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", nr_instr, nr_samples, idle_cycles, idle_samples);
-
-                //sid.clock(idle_cycles);
-                //cycles --;
-            }*/
+           
         }
 
-        // FRAME ... pull from SID until samples_in_frame is ok
+        // FRAME ... pull from SID until enough samples
         else
         {
-
-            unsigned int f_nr = cmd & 0xFFFF;
-
-            fprintf(stderr, "IDLE SAMPLES %d\n", idle_samples);
+            //fprintf(stderr, "IDLE SAMPLES %d\n", idle_samples);
             idle_samples += SAMPLE_FREQUENCY / SCREEN_REFRESH;
-            //Sample until the whole frame is filled up
-            fprintf(stderr, "IDLE SAMPLES %d\n", idle_samples);
-
-            /*while ((nr_samples > 0) && ((idle_cycles > 0) || (idle_samples > 0)))
-            {
-                reSID::cycle_count cn = CPU_FREQ;
-
-                int sampled = sid.clock(cn, samples + buf_pos, MIN(idle_samples, nr_samples));
-                idle_cycles -= (CPU_FREQ - cn);
-                nr_samples -= sampled;
-                idle_samples -= sampled;
-                buf_pos += sampled;
-                fprintf(stderr, "FRM %d, %d sampled, instr_to_go %d, samples_to_go %d, idle_cycles %d, idle_samples %d\n", f_nr, sampled, nr_instr, nr_samples, idle_cycles, idle_samples);
+            //fprintf(stderr, "IDLE SAMPLES %d\n", idle_samples);
         
-            } */
-        
-            //sid.reset();
         }
 
         nr_instr--;
     }
+    
+    return nr_samples;
 }
