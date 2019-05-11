@@ -68,10 +68,13 @@ int render_instrs(reSID::SID &sid,
     
     while ((nr_instr > 0) && (nr_samples > 0))
     {
+        fprintf(stderr, "IDLE CYCLE %d\n", idle_cycles);
 
         // if i remove idle_cycle accumulation it doesn't crackle :/
         unsigned int cmd = instrs[instr_pos++];
         idle_cycles += (cmd & (0x1FFF << 16)) >> 16;
+
+        fprintf(stderr, "IDLE CYCLE %d\n", idle_cycles);
 
         while ((nr_samples > 0) && (idle_samples > 0))
         {
