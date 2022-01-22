@@ -6,3 +6,5 @@ pipe_dream
 .vscode/
 *.so
 *.o
+.cmake
+build
